@@ -1,4 +1,4 @@
-using System.Collections;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using Unity.Mathematics;
@@ -16,7 +16,7 @@ public class LoopedLandMesh
 
     public LoopedLandMesh()
     {
-        _meshingThread = new Thread(ComputeHorizontalLoop);
+        _meshingThread = new Thread(ComputeHorizontalLoopProcess);
     }
 
     public void UpdateProcessInfo(byte[] textureData, Rect processRegion, Vector2Int textureSize, Vector2 worldSpaceArea)
@@ -29,7 +29,20 @@ public class LoopedLandMesh
         _meshingThread.Start();
     }
 
-    private void ComputeHorizontalLoop()
+    private void ComputeHorizontalLoopProcess()
+    {
+        var horizontalLoop = ComputeHorizontalLoop();
+        Thread.Yield();
+        horizontalLoop = DecimateLoop(horizontalLoop, 30);
+
+        Thread.Yield();
+        for (var i = 0; i < horizontalLoop.Count; i++)
+            Debug.DrawLine(horizontalLoop[i] * 5, horizontalLoop[(i + 1) % horizontalLoop.Count] * 5, Color.green, 100);
+
+        Debug.Log("done");
+    }
+    
+    private List<Vector3> ComputeHorizontalLoop()
     {
         var imageCoordNormalizer = new Vector2(1f / _texturePixelSize.x, 1f / _texturePixelSize.y);
 
@@ -91,13 +104,13 @@ public class LoopedLandMesh
             }
         }
 
-        var resultPoints = new List<Vector3>();
+        var result = new List<Vector3>();
         var addedHash = new HashSet<int>();
         var currentPointIndex = 0;
 
         AddPointToResultList(points[currentPointIndex]);
 
-        while (resultPoints.Count != points.Count)
+        while (result.Count != points.Count)
         {
             if (!addedHash.Contains(edgesDic[currentPointIndex].x))
                 currentPointIndex = edgesDic[currentPointIndex].x;
@@ -114,42 +127,11 @@ public class LoopedLandMesh
 
         void AddPointToResultList(Vector2 point)
         {
-            resultPoints.Add(new Vector3(point.x * _worldSpaceArea.x, 0, point.y * _worldSpaceArea.y));
+            result.Add(new Vector3(point.x * _worldSpaceArea.x, 0, point.y * _worldSpaceArea.y));
             addedHash.Add(currentPointIndex);
         }
 
-        for (var i = 0; i < resultPoints.Count - 1; i++)
-        {
-            Debug.DrawLine(resultPoints[i] * 5, resultPoints[(i + 1)] * 5, Color.green, 100);
-        }
-
-        Debug.Log("done");
-        /*
-        _loop = loopPoints;
-
-        StartCoroutine(TestLoop());
-        IEnumerator TestLoop()
-        {
-            while (_loop.Count > 30)
-            {
-                int minCurvatureIndex = 0;
-                float minCurvatureValue = float.MaxValue;
-                for (var i = 0; i < _loop.Count; i++)
-                {
-                    var curvature = _loop[i].ComputeCurvature();
-                    if (minCurvatureValue > curvature)
-                    {
-                        minCurvatureIndex = i;
-                        minCurvatureValue = curvature;
-                    }
-                }
-
-                //RemovePointFromLoop(minCurvatureIndex, ref _loop);
-
-                yield return new WaitForSeconds(1);
-            }
-        }
-        */
+        return result;
     }
 
     private int GetMaskFromSquare(byte[] data, Vector2 squareZeroPos, Vector2Int imageRectOrigin, Vector2Int imageSize)
@@ -185,4 +167,68 @@ public class LoopedLandMesh
         return data[index];
     }
 
+    private List<Vector3> DecimateLoop(List<Vector3> loop, int itemCountTarget)
+    {
+        if (itemCountTarget < 3)
+        {
+            Debug.LogWarning("Trying to decimate under a polygon");
+            return loop;
+        }
+
+        if (loop.Count <= itemCountTarget)
+        {
+            Debug.LogWarning($"Trying to decimate to {itemCountTarget} with an array of {loop.Count}");
+            return loop;
+        }
+
+        var decimateValues = new List<IndexAndDecimateValue>(loop.Count);
+
+        for (var i = 0; i < loop.Count; i++)
+        {
+            var edgeA = loop[GetLoopedIndex(i, loop.Count)] - loop[GetLoopedIndex(i - 1, loop.Count)];
+            var edgeB = loop[GetLoopedIndex(i, loop.Count)] - loop[GetLoopedIndex(i + 1, loop.Count)];
+
+            decimateValues.Add(new IndexAndDecimateValue
+            {
+                Index = i,
+                DecimateValue = Math.Abs(Vector3.Dot(edgeA, edgeB))
+            });
+        }
+        decimateValues.Sort();
+        
+        var toDeleteHash = new HashSet<int>();
+        for (var i = 0; i < loop.Count - itemCountTarget; i++)
+            toDeleteHash.Add(decimateValues[i].Index);
+
+        var result = new List<Vector3>();
+        for(var i = 0; i < loop.Count; i++)
+        {
+            if (!toDeleteHash.Contains(i))
+                result.Add(loop[i]);
+        }
+
+        return result;
+
+        int GetLoopedIndex(int index, int itemCount)
+        {
+            if (index < 0)
+                return itemCount + index;
+
+            if (index >= itemCount)
+                return index % itemCount;
+            
+            return index;
+        }
+    }
+
+    private class IndexAndDecimateValue : IComparable<IndexAndDecimateValue>
+    {
+        public int Index;
+        public float DecimateValue;
+
+        public int CompareTo(IndexAndDecimateValue other)
+        {
+            return DecimateValue.CompareTo(other.DecimateValue);
+        }
+    }
 }
