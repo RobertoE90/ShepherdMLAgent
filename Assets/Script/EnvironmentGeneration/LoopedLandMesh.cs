@@ -34,20 +34,6 @@ public class LoopedLandMesh
 
     private void ComputeHorizontalLoopProcess()
     {
-        
-        /*
-        _textureData = SkeletonizeMask(out var area);
-        for (var y = 0; y < _texturePixelSize.y; y++)
-        {
-            for (var x = 0; x < _texturePixelSize.x; x++)
-            {
-                var value = _textureData[x + y * _texturePixelSize.x];
-                Debug.Log($"value {value}");
-                Debug.DrawRay(new Vector3(x, 0, y), Vector3.up * value, Color.green, 100);
-            }
-        }
-        */
-        
         for (var j = 0; j < 10; j++)
         {
             var horizontalLoop = ComputeHorizontalLoop();
@@ -162,7 +148,6 @@ public class LoopedLandMesh
             if(currentPointIndex == -1)
                 break;
             
-            //currentPointIndex = GetLoopedIndex(currentPointIndex, points.Count);
             AddPointToResultList(points[currentPointIndex]);
         }
 
@@ -181,7 +166,7 @@ public class LoopedLandMesh
         for (var i = 0; i < MeshingUtility.GetMarchingSquaresSearchItemCount(); i++)
         {
             var searchPos = imageRectOrigin + squareZeroPos + MeshingUtility.MarchingSquaresSearchSheedAt(i);
-            byte sample = SampleImageData(searchPos, 1);
+            byte sample = SampleImageData(searchPos);
 
             if (sample != 0)
                 mask = mask | 1 << i;
@@ -260,7 +245,7 @@ public class LoopedLandMesh
                 if (kernelValue != 511 && kernelValue != 0)
                     SetCopyPixelAt(searchPos, 0);
                 else
-                    SetCopyPixelAt(searchPos, SampleImageData(searchPos, 1, 0));
+                    SetCopyPixelAt(searchPos, SampleImageData(searchPos));
                 
             }
         }
@@ -269,13 +254,14 @@ public class LoopedLandMesh
         
         void SetCopyPixelAt(Vector2 position, byte value)
         {
-            var index = ((int)position.x + (int)position.y * (int)_texturePixelSize.x);
+            var index = ((int)position.x + (int)position.y * _texturePixelSize.x) * 4;
             if (index < 0 || index >= copyData.Length)
             {
                 Debug.LogWarning("Cleaning out of range");
                 return;
             }
 
+            //works on the r channel only
             copyData[index] = value; //only one channel for now
         }
     }
@@ -283,7 +269,7 @@ public class LoopedLandMesh
     private bool IsPixelMask(Vector2 samplePoint)
     {
         //TODO: implement correct function for testing the current mask
-        var value = SampleImageData(samplePoint, 1, 0);
+        var value = SampleImageData(samplePoint);
         return value > (byte)5;
     }
     

@@ -6,6 +6,7 @@ RWTexture2D<float4> InputTexture;
 RWTexture2D<float4> ResultTexture;
 
 
+int MaskChannel;
 float NormalizedBakeHeight;
 [numthreads(4,4,1)]
 void BakeHeightCS (uint3 id : SV_DispatchThreadID)
@@ -13,12 +14,23 @@ void BakeHeightCS (uint3 id : SV_DispatchThreadID)
     float currentValue = ResultTexture[id.xy].x;
     if (currentValue < 0.01) {
         
-        float resultColor = clamp(0, 1, InputTexture[id.xy].x * 500) * NormalizedBakeHeight;
-        ResultTexture[id.xy] = float4(resultColor, resultColor, resultColor, 1);
+        float resultVal = clamp(0, 1, InputTexture[id.xy].x * 500) * NormalizedBakeHeight;
+        float4 color = float4(resultVal, 0, 0, 1);
+        //TODO:implement bake by channel
+        /*
+        if(MaskChannel == 1)
+        {
+            color = float4(0, resultVal, 0, 1);   
+        }
+        else if(MaskChannel == 2)
+        {
+            color = float4(0, 0, resultVal, 1);   
+        }
+        */
+        ResultTexture[id.xy] = color;
     }
 }
 
-int MaskChannel;
 [numthreads(4, 4, 1)]
 void ExpandMaskCS(uint3 id : SV_DispatchThreadID)
 {
