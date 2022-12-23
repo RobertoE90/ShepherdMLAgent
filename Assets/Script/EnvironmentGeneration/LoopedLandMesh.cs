@@ -14,8 +14,11 @@ public class LoopedLandMesh
     private Vector2Int _texturePixelSize;
     private Vector2 _worldSpaceArea;
 
+    private List<Vector3[]> _horizontalLoops;
+    
     public LoopedLandMesh()
     {
+        _horizontalLoops = new List<Vector3[]>();
         _meshingThread = new Thread(ComputeHorizontalLoopProcess);
     }
 
@@ -31,15 +34,49 @@ public class LoopedLandMesh
 
     private void ComputeHorizontalLoopProcess()
     {
-        var horizontalLoop = ComputeHorizontalLoop();
-        Thread.Yield();
-        horizontalLoop = DecimateLoop(horizontalLoop, 30);
-
-        Thread.Yield();
-        for (var i = 0; i < horizontalLoop.Count; i++)
-            Debug.DrawLine(horizontalLoop[i] * 5, horizontalLoop[(i + 1) % horizontalLoop.Count] * 5, Color.green, 100);
-
+        
+        /*
+        _textureData = SkeletonizeMask(out var area);
+        for (var y = 0; y < _texturePixelSize.y; y++)
+        {
+            for (var x = 0; x < _texturePixelSize.x; x++)
+            {
+                var value = _textureData[x + y * _texturePixelSize.x];
+                Debug.Log($"value {value}");
+                Debug.DrawRay(new Vector3(x, 0, y), Vector3.up * value, Color.green, 100);
+            }
+        }
+        */
+        
+        for (var j = 0; j < 10; j++)
+        {
+            var horizontalLoop = ComputeHorizontalLoop();
+            Thread.Yield();
+            
+            var decimatedLoop = DecimateLoop(horizontalLoop, 30);
+            _horizontalLoops.Add(decimatedLoop);
+            Thread.Yield();
+            
+            _textureData = SkeletonizeMask(out var area);
+            _textureData = SkeletonizeMask(out area);
+            
+            Debug.Log($"the new area is {area}");
+            Thread.Yield();
+            
+            if(area < 50)
+                break;
+        }
+        
         Debug.Log("done");
+    }
+
+    public void DrawLoops()
+    {
+        foreach (var hl in _horizontalLoops)
+        {
+            for (var i = 0; i < hl.Length; i++)
+                Debug.DrawLine(hl[i] * 5, hl[(i + 1) % hl.Length] * 5, Color.green);
+        }
     }
     
     private List<Vector3> ComputeHorizontalLoop()
@@ -55,7 +92,7 @@ public class LoopedLandMesh
             for (var x = -1; x <= _texturePixelSize.x; x++)
             {
                 var searchPos = new Vector2Int(x, y);
-                var meshSheetIndex = GetMaskFromSquare(_textureData, searchPos, Vector2Int.zero, _texturePixelSize);
+                var meshSheetIndex = GetMeshingMaskCodeFromSquare(_textureData, searchPos, Vector2Int.zero, _texturePixelSize);
 
                 var meshSheetList = MeshingUtility.MarchingSquaresMeshSheedAt(meshSheetIndex);
                 var indexConnectionList = new List<int>();
@@ -107,7 +144,7 @@ public class LoopedLandMesh
         var result = new List<Vector3>();
         var addedHash = new HashSet<int>();
         var currentPointIndex = 0;
-
+        
         AddPointToResultList(points[currentPointIndex]);
 
         while (result.Count != points.Count)
@@ -122,6 +159,10 @@ public class LoopedLandMesh
                 break;
             }
 
+            if(currentPointIndex == -1)
+                break;
+            
+            //currentPointIndex = GetLoopedIndex(currentPointIndex, points.Count);
             AddPointToResultList(points[currentPointIndex]);
         }
 
@@ -134,17 +175,13 @@ public class LoopedLandMesh
         return result;
     }
 
-    private int GetMaskFromSquare(byte[] data, Vector2 squareZeroPos, Vector2Int imageRectOrigin, Vector2Int imageSize)
+    private int GetMeshingMaskCodeFromSquare(byte[] data, Vector2 squareZeroPos, Vector2Int imageRectOrigin, Vector2Int imageSize)
     {
         int mask = 0;
         for (var i = 0; i < MeshingUtility.GetMarchingSquaresSearchItemCount(); i++)
         {
             var searchPos = imageRectOrigin + squareZeroPos + MeshingUtility.MarchingSquaresSearchSheedAt(i);
-            byte sample = SampleImageData(
-                    data,
-                    imageSize,
-                    searchPos,
-                    1);
+            byte sample = SampleImageData(searchPos, 1);
 
             if (sample != 0)
                 mask = mask | 1 << i;
@@ -153,32 +190,18 @@ public class LoopedLandMesh
         return mask;
     }
 
-    private byte SampleImageData(byte[] data, Vector2Int imageSize, Vector2 samplePoint, int imageChannels = 4, int channel = 0)
-    {
-        if (samplePoint.x < 0 || samplePoint.x >= imageSize.x ||
-            samplePoint.y < 0 || samplePoint.y >= imageSize.y)
-            return 0;
-
-        var index = ((int)samplePoint.x + (int)samplePoint.y * (int)imageSize.x) * imageChannels + channel;
-
-        if (index >= data.Length)
-            return 0;
-
-        return data[index];
-    }
-
-    private List<Vector3> DecimateLoop(List<Vector3> loop, int itemCountTarget)
+    private Vector3[] DecimateLoop(List<Vector3> loop, int itemCountTarget)
     {
         if (itemCountTarget < 3)
         {
             Debug.LogWarning("Trying to decimate under a polygon");
-            return loop;
+            return loop.ToArray();
         }
 
         if (loop.Count <= itemCountTarget)
         {
             Debug.LogWarning($"Trying to decimate to {itemCountTarget} with an array of {loop.Count}");
-            return loop;
+            return loop.ToArray();
         }
 
         var decimateValues = new List<IndexAndDecimateValue>(loop.Count);
@@ -207,20 +230,87 @@ public class LoopedLandMesh
                 result.Add(loop[i]);
         }
 
-        return result;
-
-        int GetLoopedIndex(int index, int itemCount)
-        {
-            if (index < 0)
-                return itemCount + index;
-
-            if (index >= itemCount)
-                return index % itemCount;
-            
-            return index;
-        }
+        return result.ToArray();
     }
 
+    private byte[] SkeletonizeMask(out int maskPixelCount)
+    {
+        var copyData = new byte[_textureData.Length];
+        maskPixelCount = 0;
+        for(var y = -1; y <= _region.height; y++)
+        {
+            for (var x = -1; x <= _region.width; x++)
+            {
+                int kernelValue = 0;
+                var searchPos = new Vector2(_region.x + x, _region.y + y);
+                for (var j = 0; j < 9; j++)
+                {
+                    var xDelta = (j % 3) - 1;
+                    var yDelta = (j / 3) - 1;
+
+                    var kernelSamplePosition = searchPos + new Vector2(xDelta, yDelta);
+                    var maskPixel = IsPixelMask(kernelSamplePosition);
+                    if (maskPixel)
+                        kernelValue =  kernelValue | 1 << j;
+
+                    if (xDelta == 0 && yDelta == 0 && maskPixel)
+                        maskPixelCount++;
+                }
+                
+                if (kernelValue != 511 && kernelValue != 0)
+                    SetCopyPixelAt(searchPos, 0);
+                else
+                    SetCopyPixelAt(searchPos, SampleImageData(searchPos, 1, 0));
+                
+            }
+        }
+
+        return copyData;
+        
+        void SetCopyPixelAt(Vector2 position, byte value)
+        {
+            var index = ((int)position.x + (int)position.y * (int)_texturePixelSize.x);
+            if (index < 0 || index >= copyData.Length)
+            {
+                Debug.LogWarning("Cleaning out of range");
+                return;
+            }
+
+            copyData[index] = value; //only one channel for now
+        }
+    }
+    
+    private bool IsPixelMask(Vector2 samplePoint)
+    {
+        //TODO: implement correct function for testing the current mask
+        var value = SampleImageData(samplePoint, 1, 0);
+        return value > (byte)5;
+    }
+    
+    private byte SampleImageData(Vector2 samplePoint, int imageChannels = 4, int channel = 0)
+    {
+        if (samplePoint.x < 0 || samplePoint.x >= _texturePixelSize.x ||
+            samplePoint.y < 0 || samplePoint.y >= _texturePixelSize.y)
+            return 0;
+
+        var index = ((int)samplePoint.x + (int)samplePoint.y * (int)_texturePixelSize.x) * imageChannels + channel;
+
+        if (index >= _textureData.Length)
+            return 0;
+
+        return _textureData[index];
+    }
+    
+    private int GetLoopedIndex(int index, int itemCount)
+    {
+        if (index < 0)
+            return itemCount + index;
+
+        if (index >= itemCount)
+            return index % itemCount;
+            
+        return index;
+    }
     private class IndexAndDecimateValue : IComparable<IndexAndDecimateValue>
     {
         public int Index;

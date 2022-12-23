@@ -18,6 +18,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
     private Quaternion _originRotation;
     private Vector2 _horizontalArea;
 
+    private LoopedLandMesh loopedMesh;
     
     
     private void Awake()
@@ -27,10 +28,11 @@ public class EnvironmentHeightMapController : BaseCameraBaker
     }
 
     private void Update()
-    {
-        //if (_loop == null)
-          //  return;
+    { 
+        if (loopedMesh == null)
+            return;
         
+        loopedMesh.DrawLoops();
     }
 
     public override void Initialize(Vector2 bakeArea, float texturePPU, float worldScale, Vector3 centerWorldPosition, Quaternion centerWorldRotation)
@@ -61,7 +63,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
     /// <param name="enableRandomWrite"></param>
     /// <param name="cloneFormat"></param>
     /// <returns></returns>
-    private RenderTexture CloneRenderTexureWithProperties(RenderTexture rt, bool enableRandomWrite, RenderTextureFormat cloneFormat)
+    private RenderTexture CloneRenderTextureWithProperties(RenderTexture rt, bool enableRandomWrite, RenderTextureFormat cloneFormat)
     {
         RenderTexture clone;
         clone = new RenderTexture(rt.width, rt.height, 0, cloneFormat);
@@ -79,7 +81,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
         _bakeCamera.nearClipPlane = 0.0f;
         _bakeCamera.farClipPlane = _cameraDepth;
 
-        var cameraBufferRenderTexture = CloneRenderTexureWithProperties(outputTexture, true, RenderTextureFormat.Default);
+        var cameraBufferRenderTexture = CloneRenderTextureWithProperties(outputTexture, true, RenderTextureFormat.Default);
         _bakeCamera.targetTexture = cameraBufferRenderTexture;
 
         var material = _bakeDebugMeshRenderer.material;
@@ -214,8 +216,12 @@ public class EnvironmentHeightMapController : BaseCameraBaker
                 var imageSize = new Vector2Int(clusterTexture.width, clusterTexture.height);
 
                 //TODO:add compute of looped land meshes here;
-                var loopedLand = new LoopedLandMesh();
-                loopedLand.UpdateProcessInfo(textureData, new Rect(), imageSize, _horizontalArea);
+                loopedMesh = new LoopedLandMesh();
+                loopedMesh.UpdateProcessInfo(
+                    textureData,
+                    new Rect(0, 0, imageSize.x, imageSize.y), 
+                    imageSize,
+                    _horizontalArea);
             });
         
     }
