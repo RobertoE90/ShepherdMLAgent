@@ -10,25 +10,23 @@ public class LoopedLandMesh
     
     //process info
     private byte[] _textureData;
-    private Rect _region;
     private Vector2Int _texturePixelSize;
+    private ClusterMetaData _clusterMetadata;
     private Vector2 _worldSpaceArea;
-
     private List<Vector3[]> _horizontalLoops;
     
-    public LoopedLandMesh()
+    public LoopedLandMesh(Vector2Int textureSize, Vector2 worldSpaceArea)
     {
+        _texturePixelSize = textureSize;
+        _worldSpaceArea = worldSpaceArea;
         _horizontalLoops = new List<Vector3[]>();
         _meshingThread = new Thread(ComputeHorizontalLoopProcess);
     }
 
-    public void UpdateProcessInfo(byte[] textureData, Rect processRegion, Vector2Int textureSize, Vector2 worldSpaceArea)
+    public void InitializeMeshingProcess(byte[] textureData, ClusterMetaData metadata)
     {
         _textureData = textureData;
-        _region = processRegion;
-        _texturePixelSize = textureSize;
-        _worldSpaceArea = worldSpaceArea;
-
+        _clusterMetadata = metadata;
         _meshingThread.Start();
     }
 
@@ -52,8 +50,6 @@ public class LoopedLandMesh
             if(area < 50)
                 break;
         }
-        
-        Debug.Log("done");
     }
 
     public void DrawLoops()
