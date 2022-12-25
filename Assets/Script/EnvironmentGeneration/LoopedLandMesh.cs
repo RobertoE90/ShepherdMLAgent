@@ -1,177 +1,232 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using Unity.Entities.UniversalDelegates;
 using Unity.Mathematics;
 using UnityEngine;
 
 public class LoopedLandMesh
 {
+    private Transform _parentTransform;
     private Thread _meshingThread;
     
-    //process info
     private byte[] _textureData;
-    private Vector2Int _texturePixelSize;
-    private ClusterMetaData _clusterMetadata;
+    private int2 _texturePixelSize;
     private Vector2 _worldSpaceArea;
-    private List<Vector3[]> _horizontalLoops;
-    
-    public LoopedLandMesh(Vector2Int textureSize, Vector2 worldSpaceArea)
+
+    private ClusterMetaData _clusterMetadata;
+    private List<Vector2[]> _horizontalLoops;
+
+    private int2[] _skeletonizeSearchPath =
     {
+        int2.zero,
+        new int2(0, 1),
+        new int2(1, 1),
+        new int2(1, 0),
+        new int2(1, -1),
+        new int2(0, -1),
+        new int2(-1, -1),
+        new int2(-1, 0),
+        new int2(-1, 1)
+    };
+
+    
+    public LoopedLandMesh(ClusterMetaData metadata, int2 textureSize, Vector2 worldSpaceArea, Transform parent)
+    {
+        _parentTransform = parent;
         _texturePixelSize = textureSize;
         _worldSpaceArea = worldSpaceArea;
-        _horizontalLoops = new List<Vector3[]>();
+        _clusterMetadata = metadata;
+        
+        _horizontalLoops = new List<Vector2[]>();
         _meshingThread = new Thread(ComputeHorizontalLoopProcess);
     }
 
-    public void InitializeMeshingProcess(byte[] textureData, ClusterMetaData metadata)
+    public void UpdateTextureData(byte[] textureData)
     {
         _textureData = textureData;
-        _clusterMetadata = metadata;
-        _meshingThread.Start();
+        //_meshingThread.Start();
+        
+        inspectPoint = 0;
+        _edges = _clusterMetadata.EdgePoints.ToArray();
+        toDeleteList = new List<int2>();
+        wak = true;
     }
 
+    private bool wak = false;
+    
     private void ComputeHorizontalLoopProcess()
     {
-        for (var j = 0; j < 10; j++)
-        {
-            var horizontalLoop = ComputeHorizontalLoop();
-            Thread.Yield();
-            
-            var decimatedLoop = DecimateLoop(horizontalLoop, 30);
-            _horizontalLoops.Add(decimatedLoop);
-            Thread.Yield();
-            
-            _textureData = SkeletonizeMask(out var area);
-            _textureData = SkeletonizeMask(out area);
-            
-            Debug.Log($"the new area is {area}");
-            Thread.Yield();
-            
-            if(area < 50)
-                break;
-        }
+        
+        //var horizontalLoop = ComputeHorizontalLoop();
+        //Thread.Yield();
+        //_horizontalLoops.Add(horizontalLoop.ToArray());
+        
+        //var decimatedLoop = DecimateLoop(horizontalLoop, 30);
+        //_horizontalLoops.Add(decimatedLoop);
+        Thread.Yield();
+        //wak = true;
     }
 
     public void DrawLoops()
     {
+        if (!wak)
+            return;
+        
+        ComputeHorizontalLoopTick();
+        
+        /*
         foreach (var hl in _horizontalLoops)
         {
             for (var i = 0; i < hl.Length; i++)
-                Debug.DrawLine(hl[i] * 5, hl[(i + 1) % hl.Length] * 5, Color.green);
+            {
+                var pa = hl[i];
+                var pb = hl[(i + 1) % hl.Length];
+                Debug.DrawLine(new Vector3(pa.x, 0, pa.y), new Vector3(pb.x, 0, pb.y), Color.green);
+            }
+        }
+        */
+
+        
+    }
+
+    public void DrawEdges()
+    {
+        Gizmos.matrix = Matrix4x4.identity;
+        Gizmos.color = Color.red;
+        foreach (var ep in _clusterMetadata.EdgePoints)
+        {
+            Gizmos.DrawCube(new Vector3(ep.x, 0, ep.y), Vector3.one);
         }
     }
     
-    private List<Vector3> ComputeHorizontalLoop()
+    #region CONCAVE_HULL_METHOD
+
+    private int inspectPoint;
+    private int2[] _edges;
+    private List<int2> toDeleteList;
+    private bool _removeEcxeed = false;
+    
+    private void ComputeHorizontalLoopTick()
     {
-        var imageCoordNormalizer = new Vector2(1f / _texturePixelSize.x, 1f / _texturePixelSize.y);
-
-        var points = new List<Vector2>();
-        var pointsToIndexDic = new Dictionary<Vector2Int, int>();
-        var edgesDic = new Dictionary<int, int2>();
-
-        for (var y = -1; y <= _texturePixelSize.y; y++)
+        if (inspectPoint >= _edges.Length)
         {
-            for (var x = -1; x <= _texturePixelSize.x; x++)
-            {
-                var searchPos = new Vector2Int(x, y);
-                var meshSheetIndex = GetMeshingMaskCodeFromSquare(_textureData, searchPos, Vector2Int.zero, _texturePixelSize);
+            inspectPoint = 0;
+            foreach (var toDelete in toDeleteList)
+                _clusterMetadata.EdgePoints.Remove(toDelete);
 
-                var meshSheetList = MeshingUtility.MarchingSquaresMeshSheedAt(meshSheetIndex);
-                var indexConnectionList = new List<int>();
-                for (var i = 0; i < meshSheetList.Length; i += 2)
-                {
-                    var pA = searchPos + MeshingUtility.MarchingSquaresSearchSheedAt(meshSheetList[i]);
-                    var pB = searchPos + MeshingUtility.MarchingSquaresSearchSheedAt(meshSheetList[i + 1]);
-
-                    var pointKey = new Vector2Int((int)(pA.x + pB.x), (int)(pA.y + pB.y));
-                    if (!pointsToIndexDic.ContainsKey(pointKey))
-                    {
-                        pointsToIndexDic.Add(pointKey, points.Count);
-                        points.Add(Vector2.Scale((pA + pB) * 0.5f, imageCoordNormalizer)); //the point dimensions are normalized to the image size
-                    }
-
-                    indexConnectionList.Add(pointsToIndexDic[pointKey]);
-                }
-
-                for (var i = 0; i < indexConnectionList.Count; i += 2)
-                {
-                    var edgePointA = indexConnectionList[i];
-                    var edgePointB = indexConnectionList[i + 1];
-
-                    if (!edgesDic.ContainsKey(edgePointA))
-                    {
-                        edgesDic.Add(edgePointA, new int2(edgePointB, -1));
-                    }
-                    else
-                    {
-                        var edge = edgesDic[edgePointA];
-                        edge.y = edgePointB;
-                        edgesDic[edgePointA] = edge;
-                    }
-
-                    if (!edgesDic.ContainsKey(edgePointB))
-                    {
-                        edgesDic.Add(edgePointB, new int2(edgePointA, -1));
-                    }
-                    else
-                    {
-                        var edge = edgesDic[edgePointB];
-                        edge.y = edgePointA;
-                        edgesDic[edgePointB] = edge;
-                    }
-                }
-            }
-        }
-
-        var result = new List<Vector3>();
-        var addedHash = new HashSet<int>();
-        var currentPointIndex = 0;
-        
-        AddPointToResultList(points[currentPointIndex]);
-
-        while (result.Count != points.Count)
-        {
-            if (!addedHash.Contains(edgesDic[currentPointIndex].x))
-                currentPointIndex = edgesDic[currentPointIndex].x;
-            else if (!addedHash.Contains(edgesDic[currentPointIndex].y))
-                currentPointIndex = edgesDic[currentPointIndex].y;
-            else
-            {
-                Debug.LogError("Both point edges are added");
-                break;
-            }
-
-            if(currentPointIndex == -1)
-                break;
+            if(!_removeEcxeed)
+                _removeEcxeed = toDeleteList.Count == 0;
             
-            AddPointToResultList(points[currentPointIndex]);
+            Debug.Log($"killed {_removeEcxeed} : {toDeleteList.Count} ");
+            toDeleteList.Clear();
+            
+            _edges = _clusterMetadata.EdgePoints.ToArray();
+            Debug.Break();
         }
+        
+        if(_edges.Length == 0)
+            return;
 
-        void AddPointToResultList(Vector2 point)
+        var searchPoint = _edges[inspectPoint];
+        if (!_clusterMetadata.EdgePoints.Contains(searchPoint))
         {
-            result.Add(new Vector3(point.x * _worldSpaceArea.x, 0, point.y * _worldSpaceArea.y));
-            addedHash.Add(currentPointIndex);
+            inspectPoint++;
+            return;
         }
 
-        return result;
+        if (_removeEcxeed)
+        {
+            var sum = 0;
+            for (var y = -1; y <= 1; y++)
+            {
+                for (var x = -1; x <= 1; x++)
+                {
+                    if (_clusterMetadata.EdgePoints.Contains(searchPoint + new int2(x, y)))
+                        sum++;
+                }
+            }
+
+            if (sum != 3)
+            {
+                toDeleteList.Add(searchPoint);
+                Debug.Log($"for this {sum}");
+                Debug.DrawRay(new Vector3(searchPoint.x, 0, searchPoint.y), Vector3.up * 5, Color.blue);
+                Debug.Break();
+            }
+
+            inspectPoint++;
+            return;
+        }
+
+        var sumCenter = 0;
+        var sumTransitions = 0;
+        
+        var condC = false;
+        var condD = false;
+        
+        var condE = false;
+        var condF = false;
+
+        
+        for (var i = 0; i < _skeletonizeSearchPath.Length; i++)
+        {
+            var candidatePoint = searchPoint + _skeletonizeSearchPath[i];
+            var isCandidatePositive = _clusterMetadata.EdgePoints.Contains(candidatePoint);
+            if (isCandidatePositive)
+                sumCenter++;
+
+            if (i == 1 || i == 3 || i == 5)
+                condC |= isCandidatePositive;
+            
+            if (i == 3 || i == 5 || i == 7)
+                condD |= isCandidatePositive;
+
+            if (i == 1 || i == 3 || i == 7)
+                condE |= isCandidatePositive;
+            
+            if (i == 1 || i == 5 || i == 7)
+                condF |= isCandidatePositive;
+            
+            if(i == 0)
+                continue;
+
+            var nextInLoop = i + 1;
+            if (nextInLoop == _skeletonizeSearchPath.Length)
+                nextInLoop = 1;
+            
+            var isNextCandidatePositive = _clusterMetadata.EdgePoints.Contains(searchPoint + _skeletonizeSearchPath[nextInLoop]);
+
+            if (!isCandidatePositive && isNextCandidatePositive)
+                sumTransitions++;
+        }
+
+        var condA = 2 <= sumCenter && sumCenter <= 6;
+        var condB = sumTransitions == 1;
+
+        condC = !condC && !condD;
+        condE = !condE && !condF;
+        
+        if (condA && condB)
+        {
+            if (condC || condE)
+                toDeleteList.Add(searchPoint);
+        }
+        
+        Debug.DrawRay(new Vector3(searchPoint.x, 0, searchPoint.y), Vector3.up * 5, Color.blue);
+        //Debug.Log($"waka {condC} : {condD}");
+        //Debug.Break();
+
+        inspectPoint++;
     }
 
-    private int GetMeshingMaskCodeFromSquare(byte[] data, Vector2 squareZeroPos, Vector2Int imageRectOrigin, Vector2Int imageSize)
-    {
-        int mask = 0;
-        for (var i = 0; i < MeshingUtility.GetMarchingSquaresSearchItemCount(); i++)
-        {
-            var searchPos = imageRectOrigin + squareZeroPos + MeshingUtility.MarchingSquaresSearchSheedAt(i);
-            byte sample = SampleImageData(searchPos);
+    
+    
+    #endregion
 
-            if (sample != 0)
-                mask = mask | 1 << i;
-        }
-
-        return mask;
-    }
-
-    private Vector3[] DecimateLoop(List<Vector3> loop, int itemCountTarget)
+    private Vector2[] DecimateLoop(List<Vector2> loop, int itemCountTarget)
     {
         if (itemCountTarget < 3)
         {
@@ -195,7 +250,7 @@ public class LoopedLandMesh
             decimateValues.Add(new IndexAndDecimateValue
             {
                 Index = i,
-                DecimateValue = Math.Abs(Vector3.Dot(edgeA, edgeB))
+                DecimateValue = Math.Abs(Vector2.Dot(edgeA, edgeB))
             });
         }
         decimateValues.Sort();
@@ -204,7 +259,7 @@ public class LoopedLandMesh
         for (var i = 0; i < loop.Count - itemCountTarget; i++)
             toDeleteHash.Add(decimateValues[i].Index);
 
-        var result = new List<Vector3>();
+        var result = new List<Vector2>();
         for(var i = 0; i < loop.Count; i++)
         {
             if (!toDeleteHash.Contains(i))
@@ -212,75 +267,6 @@ public class LoopedLandMesh
         }
 
         return result.ToArray();
-    }
-
-    private byte[] SkeletonizeMask(out int maskPixelCount)
-    {
-        var copyData = new byte[_textureData.Length];
-        maskPixelCount = 0;
-        for(var y = -1; y <= _region.height; y++)
-        {
-            for (var x = -1; x <= _region.width; x++)
-            {
-                int kernelValue = 0;
-                var searchPos = new Vector2(_region.x + x, _region.y + y);
-                for (var j = 0; j < 9; j++)
-                {
-                    var xDelta = (j % 3) - 1;
-                    var yDelta = (j / 3) - 1;
-
-                    var kernelSamplePosition = searchPos + new Vector2(xDelta, yDelta);
-                    var maskPixel = IsPixelMask(kernelSamplePosition);
-                    if (maskPixel)
-                        kernelValue =  kernelValue | 1 << j;
-
-                    if (xDelta == 0 && yDelta == 0 && maskPixel)
-                        maskPixelCount++;
-                }
-                
-                if (kernelValue != 511 && kernelValue != 0)
-                    SetCopyPixelAt(searchPos, 0);
-                else
-                    SetCopyPixelAt(searchPos, SampleImageData(searchPos));
-                
-            }
-        }
-
-        return copyData;
-        
-        void SetCopyPixelAt(Vector2 position, byte value)
-        {
-            var index = ((int)position.x + (int)position.y * _texturePixelSize.x) * 4;
-            if (index < 0 || index >= copyData.Length)
-            {
-                Debug.LogWarning("Cleaning out of range");
-                return;
-            }
-
-            //works on the r channel only
-            copyData[index] = value; //only one channel for now
-        }
-    }
-    
-    private bool IsPixelMask(Vector2 samplePoint)
-    {
-        //TODO: implement correct function for testing the current mask
-        var value = SampleImageData(samplePoint);
-        return value > (byte)5;
-    }
-    
-    private byte SampleImageData(Vector2 samplePoint, int imageChannels = 4, int channel = 0)
-    {
-        if (samplePoint.x < 0 || samplePoint.x >= _texturePixelSize.x ||
-            samplePoint.y < 0 || samplePoint.y >= _texturePixelSize.y)
-            return 0;
-
-        var index = ((int)samplePoint.x + (int)samplePoint.y * (int)_texturePixelSize.x) * imageChannels + channel;
-
-        if (index >= _textureData.Length)
-            return 0;
-
-        return _textureData[index];
     }
     
     private int GetLoopedIndex(int index, int itemCount)
@@ -293,6 +279,7 @@ public class LoopedLandMesh
             
         return index;
     }
+    
     private class IndexAndDecimateValue : IComparable<IndexAndDecimateValue>
     {
         public int Index;
