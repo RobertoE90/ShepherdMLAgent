@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Mathematics;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Debug = UnityEngine.Debug;
@@ -14,6 +14,11 @@ public class EnvironmentHeightMapController : BaseCameraBaker
     [SerializeField] private ComputeShader _imageProcessingComputeShader;
     [SerializeField] private Color _volumeColor;
 
+    [Space(20)] 
+    [SerializeField] [Range(0.01f, 0.5f)] private float _verticalSubdivisionHeightFraction;
+    [SerializeField] private int _verticalSubdivisionRangeMin;
+    [SerializeField] private int _verticalSubdivisionRangeMax;
+    
     private Vector3 _originPosition;
     private Quaternion _originRotation;
     private Vector2 _horizontalArea;
@@ -54,7 +59,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
     {
         await RenderDepthMap(_bakeTexture);
         var scaledTexture = ResizeRenderTexture(_bakeTexture, new Vector2Int(52, 52));
-        await Task.Delay(3000);
+        await Task.Yield();
         BeginClusteringProcess(scaledTexture);
     }
     
@@ -131,13 +136,11 @@ public class EnvironmentHeightMapController : BaseCameraBaker
             OnMeshClusterFinishedAction?.Invoke();
         }
         
-        if (_landMeshes == null || _landMeshes.Count == 0)
+        if(_landMeshes.Count == 0)
             return;
         
-        _landMeshes[0].DrawLoops();
-
-        //_debugCluster++;
-        //_debugCluster = _debugCluster % _landMeshes.Count;
+        _debugCluster++;
+        _debugCluster %= _landMeshes.Count;
     }
     
     private void UpdateLoopedMeshes()
@@ -165,12 +168,22 @@ public class EnvironmentHeightMapController : BaseCameraBaker
         var material = _bakeDebugMeshRenderer.material;
         material.SetTexture("_BaseMap", t);
 
-        
+
+        var verticalResolutionDistance = 0.1f;
         foreach (var cm in _clustersMetadata)
         {
-            var llm = new LoopedLandMesh(cm, _textureDataUtility.TextureSize, _horizontalArea, transform);
+            var clusterHeight = _cameraDepth * (float)cm.MaxValue / 255f;
+            var verticalLoopCount = (int) (clusterHeight / verticalResolutionDistance);
+            verticalLoopCount += UnityEngine.Random.Range(0, 3);
+            
+            var verticalResolution = Mathf.Clamp(
+                verticalLoopCount,
+                _verticalSubdivisionRangeMin, 
+                _verticalSubdivisionRangeMax);
+            
+            var llm = new LoopedLandMesh(cm, verticalResolution, _cameraDepth, _horizontalArea, transform);
             _landMeshes.Add(llm);
-            llm.UpdateTextureData(_textureDataUtility.TextureData);
+            llm.UpdateTextureData(_textureDataUtility.TextureData, _textureDataUtility.TextureSize);
         }
     }
     
@@ -198,7 +211,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
             source.width / 4, 
             source.height / 4, 
             1);
-
+        
         AsyncGPUReadback.Request(
             source,
             0,
@@ -272,7 +285,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
             _textureDataUtility.IsPixelInRange(currentPosition, out var currentIndex);
             var currentPixel = _textureDataUtility.GetPixelValues(currentIndex);
             
-            if(currentPixel[2] != 0) //don't process if it has passed
+            if(currentPixel[(int)MapChannelCode.Visited] != 0) //don't process if it has passed
                 continue;
             
             for(var it = 0; it < _textureDataUtility.GetNeighborSearchDirectionsCount(); it++)
@@ -284,14 +297,14 @@ public class EnvironmentHeightMapController : BaseCameraBaker
                     continue;
 
                 var neighborValues = _textureDataUtility.GetPixelValues(neighborIndex);
-                var dif = Mathf.Abs(currentPixel[0] - neighborValues[0]);
-                if (dif <= CLUSTER_THRESHOLD && neighborValues[3] != 0)
+                var dif = Mathf.Abs(currentPixel[(int)MapChannelCode.Height] - neighborValues[(int)MapChannelCode.Height]);
+                if (dif <= CLUSTER_THRESHOLD && neighborValues[(int)MapChannelCode.Alpha] != 0)
                     clusterQueue.Enqueue(neighborPos);
                 
             }
 
-            _textureDataUtility.UpdateTextureData((byte)currentClusterId, currentIndex + 1);
-            _textureDataUtility.UpdateTextureData(byte.MaxValue, currentIndex + 2);
+            _textureDataUtility.UpdateTextureData((byte)currentClusterId, currentIndex, MapChannelCode.ClusterId);
+            _textureDataUtility.UpdateTextureData(byte.MaxValue, currentIndex, MapChannelCode.Visited);
             
             UpdateClusterMetadataInfo(currentPosition, currentPixel[0]);
         }
@@ -309,7 +322,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
                     result = new int2(x, y);
                     _textureDataUtility.IsPixelInRange(result, out var index);
                     var pixelValues = _textureDataUtility.GetPixelValues(index);
-                    if (pixelValues[2] == 0 && pixelValues[3] != 0)
+                    if (pixelValues[(int)MapChannelCode.Visited] == 0 && pixelValues[(int)MapChannelCode.Alpha] != 0)
                         return true;
                 }
             }
@@ -344,55 +357,13 @@ public class EnvironmentHeightMapController : BaseCameraBaker
 
     private void MergeClusters(List<ClusterMetaData> clustersMetadata, int mergeThreshold)
     {
-        var toMergeList = new List<ClusterMetaData>();
         for (var i = 0; i < clustersMetadata.Count; i++)
         {
             var clusterMeta = clustersMetadata[i];
             if (clusterMeta.Bounds.size.x <= mergeThreshold || clusterMeta.Bounds.size.y <= mergeThreshold)
             {
                 clustersMetadata.RemoveAt(i);
-                toMergeList.Add(clusterMeta);
                 i--;
-            }
-        }
-
-        for (var i = 0; i < clustersMetadata.Count; i++)
-        {
-            var mergeCandidate = clustersMetadata[i];
-            for (var j = 0; j < toMergeList.Count; j++)
-            {
-                var toMergeBound = toMergeList[j];
-                var points = new Vector2[]
-                {
-                    toMergeBound.Bounds.position,
-                    toMergeBound.Bounds.position + toMergeBound.Bounds.width * Vector2.right,
-                    toMergeBound.Bounds.position + toMergeBound.Bounds.height * Vector2.up,
-                    toMergeBound.Bounds.position + new Vector2(toMergeBound.Bounds.width, toMergeBound.Bounds.height),
-                };
-
-                var containsAll = true;
-                foreach (var p in points)
-                {
-                    if (!mergeCandidate.Bounds.Contains(p))
-                    {
-                        containsAll = false;
-                        break;
-                    }   
-                }
-
-                if (containsAll)
-                {
-                    //do merge 
-                    toMergeList.RemoveAt(j);
-                    if (mergeCandidate.MinValue > toMergeBound.MinValue)
-                        mergeCandidate.MinValue = toMergeBound.MinValue;
-                    
-                    if (mergeCandidate.MaxValue < toMergeBound.MaxValue)
-                        mergeCandidate.MaxValue = toMergeBound.MaxValue;
-
-                    clustersMetadata[i] = mergeCandidate;
-                    break;
-                }
             }
         }
     }
@@ -482,8 +453,10 @@ public class EnvironmentHeightMapController : BaseCameraBaker
 
         Gizmos.matrix *= Matrix4x4.Translate(new Vector3(2f, 0f, 0f));
         
+        /*
         var normalizer = new Vector2(1f / _textureDataUtility.TextureSize.x, 1f / _textureDataUtility.TextureSize.y);
         var i = 0;
+        
         foreach (var clusterMeta in _clustersMetadata)
         {
             if(i == _debugCluster)
@@ -504,12 +477,19 @@ public class EnvironmentHeightMapController : BaseCameraBaker
             Gizmos.DrawWireCube(
                 new Vector3(center.x,   maxHeight * 0.5f, center.y), 
                 new Vector3(distance.x, maxHeight, distance.y));
+            
         }
+        */
         
         if (_landMeshes == null || _landMeshes.Count == 0)
             return;
+
+        //_landMeshes[_debugCluster].DrawGizmos();
         
-        _landMeshes[0].DrawGizmos();
+        foreach (var lm in _landMeshes)
+        {
+            lm.DrawGizmos();
+        }
     }
 }
 
@@ -577,10 +557,18 @@ public class TextureDataUtility
         }
     }
 
-    public void UpdateTextureData(byte value, int index)
+    public void UpdateTextureData(byte value, int index, MapChannelCode channelCode)
     {
-        _textureData[index] = value;
+        _textureData[index + (int)channelCode] = value;
     }
+}
+
+public enum MapChannelCode
+{
+    Height = 0,
+    ClusterId = 1,
+    Visited = 2,
+    Alpha = 3
 }
 
 public struct ClusterMetaData
