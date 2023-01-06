@@ -24,7 +24,6 @@ public class PositionIDBakeController : BaseEntityCameraBaker
             typeof(Scale),
             typeof(RenderBounds),
             typeof(RenderMesh),
-            typeof(URPMaterialPropertyBaseColor),
             typeof(CopyTransformReferenceComponent)
         });
 
@@ -56,12 +55,6 @@ public class PositionIDBakeController : BaseEntityCameraBaker
             var iPrimaryAxis = (int)(i / 255f);
             var iSecoundarySeAxis = i % 255f;
 
-            entityManager.SetComponentData<URPMaterialPropertyBaseColor>(
-                bakerEntities[i],
-                new URPMaterialPropertyBaseColor
-                {
-                    Value = new float4(1f, iPrimaryAxis / 255f, iSecoundarySeAxis / 255f, 1f)
-                });
 
             entityManager.SetComponentData<CopyTransformReferenceComponent>(
                 bakerEntities[i],

@@ -1,7 +1,6 @@
 //#define DEBUG_RAYS
 
 using Unity.Entities;
-using Unity.Jobs;
 using Unity.Transforms;
 using UnityEngine;
 using Unity.Mathematics;
@@ -9,7 +8,7 @@ using Unity.Collections;
 using System;
 using UnityEngine.Rendering;
 using Unity.Burst;
-using Unity.Rendering;
+using UnityEngine.Rendering.Universal;
 
 public class SheepHeardJobSystem : SystemBase
 {
@@ -173,7 +172,6 @@ public class SheepHeardJobSystem : SystemBase
             GetComponentTypeHandle<Translation>(),
             GetComponentTypeHandle<Rotation>(),
             GetComponentTypeHandle<SheepComponentDataEntity>(),
-            GetComponentTypeHandle<URPMaterialPropertyBaseColor>(),
             inputAttractArray,
             randomArrays,
             _bakedHeatTextureData,
@@ -211,7 +209,6 @@ public class SheepHeardJobSystem : SystemBase
         private ComponentTypeHandle<Translation> _translationType;
         private ComponentTypeHandle<Rotation> _rotationType;
         private ComponentTypeHandle<SheepComponentDataEntity> _sheepType;
-        private ComponentTypeHandle<URPMaterialPropertyBaseColor> _color;
         [ReadOnly] private NativeArray<InputPoint> _inputAttractArray;
         [ReadOnly] private NativeArray<RandomData> _randomDataArray;
         [ReadOnly] private NativeArray<byte> _heatMap;
@@ -234,7 +231,6 @@ public class SheepHeardJobSystem : SystemBase
             ComponentTypeHandle<Translation> t,
             ComponentTypeHandle<Rotation> r,
             ComponentTypeHandle<SheepComponentDataEntity> sheepComponent,
-            ComponentTypeHandle<URPMaterialPropertyBaseColor> color,
             NativeArray<InputPoint> inputAttractArray,
             NativeArray<RandomData> randomDataArray,
             NativeArray<byte> heatMap,
@@ -250,7 +246,6 @@ public class SheepHeardJobSystem : SystemBase
             _translationType = t;
             _rotationType = r;
             _sheepType = sheepComponent;
-            _color = color;
 
             _inputAttractArray = inputAttractArray;
             _randomDataArray = randomDataArray;
@@ -276,7 +271,6 @@ public class SheepHeardJobSystem : SystemBase
             NativeArray<Translation> translations = batchInChunk.GetNativeArray(this._translationType);
             NativeArray<Rotation> rotations = batchInChunk.GetNativeArray(this._rotationType);
             NativeArray<SheepComponentDataEntity> sheeps = batchInChunk.GetNativeArray(this._sheepType);
-            NativeArray<URPMaterialPropertyBaseColor> colors = batchInChunk.GetNativeArray(this._color);
 
 
             for (int i = 0; i < batchInChunk.Count; ++i)
@@ -284,28 +278,27 @@ public class SheepHeardJobSystem : SystemBase
                 var translation = translations[i];
                 var rotation = rotations[i];
                 var sheep = sheeps[i];
-                var color = colors[i];
 
                 switch (sheep.CurrentState) {
                     case 0: //move to target
                         MoveToTarget(ref translation, rotation, ref sheep);
-                        color.Value = new float4(0, 1, 0, 0);
+                        //color.Value = new float4(0, 1, 0, 0);
                         break;
                     case 1: //move to trace
                         FollowOthersTrace(ref translation, rotation, ref sheep);
-                        color.Value = new float4(0, 0.5f, 0.5f, 0);
+                        //color.Value = new float4(0, 0.5f, 0.5f, 0);
                         break;
                     case 2: //move to less heat zone
-                        color.Value = new float4(0, 0, 1, 0);
+                        //color.Value = new float4(0, 0, 1, 0);
                         MoveToLessHeat(ref translation, rotation, ref sheep);
                         break;
                     case 3: //idle
-                        color.Value = new float4(1, 0, 1, 0);
+                        //color.Value = new float4(1, 0, 1, 0);
                         Idle(ref sheep, translation.Value);
                         break;
                     case 4: //run away
                         RepulseBehavior(ref translation, ref rotation, ref sheep);
-                        color.Value = new float4(1, 0, 0, 0);
+                        //color.Value = new float4(1, 0, 0, 0);
                         break;
                 }
 
@@ -318,7 +311,7 @@ public class SheepHeardJobSystem : SystemBase
 
                 translations[i] = translation;
                 sheeps[i] = sheep;
-                colors[i] = color;
+                //colors[i] = color;
             }
         }
 

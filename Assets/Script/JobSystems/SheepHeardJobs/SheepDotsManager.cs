@@ -103,7 +103,6 @@ public class SheepDotsManager : MonoBehaviour
             typeof(ChunkWorldRenderBounds),
             typeof(PerInstanceCullingTag),
             typeof(RenderMesh),
-            typeof(URPMaterialPropertyBaseColor),
             typeof(SheepComponentDataEntity),
 
         });
