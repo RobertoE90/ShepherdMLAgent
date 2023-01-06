@@ -432,15 +432,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _bakeCamera: {fileID: 1824915607}
   _bakeDebugMeshRenderer: {fileID: 250510252}
-  _debugMeshSizeUnitsDisplacement: {x: 1, y: 0.1, z: 0}
+  _debugMeshSizeUnitsDisplacement: {x: 1, y: -0.1, z: 0}
   _bakeLayerName: 3dScan
   writeToBakedTexture: 1
   _cameraDepth: 1.25
   _textureFilterMode: 0
   _bakeTextureFormat: 0
   _imageProcessingComputeShader: {fileID: 7200000, guid: 360edb989e9bcbb4a9aaa3226c902e1f, type: 3}
-  _meshMaterial: {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
   _volumeColor: {r: 0.066278934, g: 0, b: 1, a: 1}
+  _verticalSubdivisionHeightFraction: 0.015
+  _verticalSubdivisionRangeMin: 3
+  _verticalSubdivisionRangeMax: 10
 --- !u!1 &532375545
 GameObject:
   m_ObjectHideFlags: 0
@@ -597,7 +599,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 734354296}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: -10, z: 0}
   m_LocalScale: {x: 0.01, y: 0.01, z: 0.01}
   m_Children:
   - {fileID: 963194228}

@@ -1,16 +1,15 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using Unity.Entities.UniversalDelegates;
 using Unity.Mathematics;
 using UnityEngine;
-using Random = System.Random;
+using Random = UnityEngine.Random;
 
 public class LoopedLandMesh
 {
     private Transform _parentTransform;
+    private GameObject _meshGameObject;
     private Thread _meshingThread;
     
     //private byte[] _textureData;
@@ -21,27 +20,65 @@ public class LoopedLandMesh
     private TextureDataUtility _textureDataUtility;
     private List<Vector2> _maskLoop;
 
+    private int _verticalLoopsCount = 0;
     private int[] _decimateRandomDeltas;
     private List<Vector2[]> _horizontalLoops;
 
+    private Vector3[] _meshPoints;
+    private List<int> _triangles;
+    private Mesh _mesh;
+
+    private bool _updateMeshFlag = false;
+    private bool _killThreadFlag = false;
     
     public LoopedLandMesh(ClusterMetaData metadata, int verticalMeshResolution, float worldHeight, Vector2 worldSpaceArea, Transform parent)
     {
         _parentTransform = parent;
+        _meshGameObject = new GameObject("LandMesh");
+        _meshGameObject.transform.SetParent(_parentTransform);
+
+        var meshRender = _meshGameObject.AddComponent<MeshFilter>();
+        AddMaterial();
         
         _worldHeight = worldHeight;
         _worldSpaceArea = worldSpaceArea;
         
         _clusterMetadata = metadata;
-        _horizontalLoops = new List<Vector2[]>(verticalMeshResolution);
 
-        _decimateRandomDeltas = new int[verticalMeshResolution];
-        for (var i = 0; i < verticalMeshResolution; i++)
-            _decimateRandomDeltas[i] = UnityEngine.Random.Range(3, 25);
+        _verticalLoopsCount = verticalMeshResolution;
+        _horizontalLoops = new List<Vector2[]>();
+
+        _decimateRandomDeltas = new int[_verticalLoopsCount];
+        bool verticalDecrement = Random.value > 0.5f;
+        var initValue = Random.Range(20, 30);
+        if (!verticalDecrement)
+            initValue = Random.Range(3, 7);
+
+        var cad = "";
+        for (var i = 0; i < _verticalLoopsCount; i++)
+        {
+            var nextValue = initValue + (Random.Range(3, 10) * (verticalDecrement ? -1 : 1));
+            _decimateRandomDeltas[i] = Mathf.Clamp(nextValue, 3, 50);
+            initValue = nextValue;
+            cad += $"{_decimateRandomDeltas[i]}  ";
+        }
+
+        Debug.Log($"aaa {verticalDecrement}: {cad}");
+
+        _mesh = new Mesh();
+        meshRender.mesh = _mesh;
         
+        _triangles = new List<int>();
         _meshingThread = new Thread(ComputeHorizontalLoopProcess);
     }
 
+    private void AddMaterial()
+    {
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Simple Lit"));
+        var renderer = _meshGameObject.AddComponent<MeshRenderer>();
+        renderer.material = mat;
+    }
+    
     public void UpdateTextureData(byte[] textureData, int2 texturePixelSize)
     {
         var textureDataCopy = new byte[texturePixelSize.x * texturePixelSize.y * 3]; //only 3 channels
@@ -62,18 +99,42 @@ public class LoopedLandMesh
 
     private void ComputeHorizontalLoopProcess()
     {
+        
         ExpandClusterBorders();
         var edges = ComputeBoundEdges();
         ComputeMaskLoop(new HashSet<int2>(edges));
 
         var pointCount = (int)(_maskLoop.Count * 0.15f);
-        for (var i = 0; i < _horizontalLoops.Capacity; i++)
+        
+        for (var i = 0; i < _verticalLoopsCount; i++)
         {
             var decimatedLoop = DecimateLoop(_maskLoop,pointCount + _decimateRandomDeltas[i]);
             _horizontalLoops.Add(decimatedLoop);
         }
         
-        //_horizontalLoops.Add(decimatedLoop);
+        Thread.Yield();
+
+        _meshPoints = GenerateMeshPoints().ToArray();
+       // _mesh.SetVertices(GenerateMeshPoints());
+       TriangulateMeshLoops();
+        _updateMeshFlag = true;
+        
+    }
+
+    private List<Vector3> GenerateMeshPoints()
+    {
+        var points = new List<Vector3>();
+        var hDelta =  _worldHeight * (float)(_clusterMetadata.MaxValue / 255f) / (_horizontalLoops.Count - 1);
+
+        var hIndex = 0;
+        foreach (var loop in _horizontalLoops)
+        {
+            foreach (var p in loop)
+                points.Add(new Vector3(p.x, hDelta * hIndex, p.y));
+
+            hIndex++;
+        }
+        return points;
     }
 
     private void ExpandClusterBorders()
@@ -277,43 +338,6 @@ public class LoopedLandMesh
         }
     }
     
-    public void DrawGizmos()
-    {
-        //Gizmos.matrix = Matrix4x4.identity;
-        
-        Gizmos.color = new Color(_clusterMetadata.ClusterId / 50f, 0f, 1f);
-        try
-        {
-            var h =  _worldHeight * (float)(_clusterMetadata.MaxValue / 255f) / (_horizontalLoops.Count - 1);
-            for (var j = 0; j < _horizontalLoops.Count; j++)
-            {
-                var loop = _horizontalLoops[j];
-                Vector2 pa;
-                Vector2 pb;
-                for (var i = 0; i < loop.Length; i++)
-                {
-                    pa = loop[i];
-                    pb = loop[(i + 1) % loop.Length];
-                    Gizmos.DrawLine(new Vector3(pa.x, h * j, pa.y), new Vector3(pb.x, h * j, pb.y));
-                }
-
-                if (j > _horizontalLoops.Count - 1)
-                    continue;
-                
-                pa = _horizontalLoops[j][0];
-                pb = _horizontalLoops[j + 1][0];
-                Gizmos.DrawLine(new Vector3(pa.x, h * j, pa.y), new Vector3(pb.x, h * (j + 1), pb.y));
-                
-            }
-        }
-        catch (Exception e)
-        {
-            
-        }
-        //gizmos stuffs
-    }
-    
-
     private Vector2[] DecimateLoop(List<Vector2> loop, int itemCountTarget)
     {
         if (itemCountTarget < 3)
@@ -366,6 +390,171 @@ public class LoopedLandMesh
             return index % itemCount;
             
         return index;
+    }
+
+    
+    private void TriangulateMeshLoops()
+    {
+        var h =  _worldHeight * (float)(_clusterMetadata.MaxValue / 255f) / (_horizontalLoops.Count - 1);
+        var meshPointIndexCarrie = 0;
+        
+        for (var vI = 0; vI < _horizontalLoops.Count - 1; vI++)
+        {
+            var bottomPivotIndex = 0;
+            var bottomPivotStretch = 0f;
+            
+            var upPivotIndex = 0;
+            var upPivotStretch = 0f;
+            
+            while (true)
+            {
+                if (_killThreadFlag)
+                {
+                    _killThreadFlag = false;
+                    return;
+                }
+
+                var bottomLoop = _horizontalLoops[vI];
+                var upLoop = _horizontalLoops[vI + 1];
+
+                var bottomStretchDelta = 0f;
+                var upStretchDelta = 0f;
+                
+                try
+                {
+                    bottomStretchDelta =
+                        (bottomLoop[bottomPivotIndex] - bottomLoop[(bottomPivotIndex + 1) % bottomLoop.Length])
+                        .magnitude;
+
+                    upStretchDelta = (upLoop[upPivotIndex] - upLoop[(upPivotIndex + 1) % upLoop.Length]).magnitude;
+                }
+                catch (IndexOutOfRangeException e)
+                {
+                    
+                }
+
+                var points = new Vector2[]
+                {
+                    Vector2.right * bottomPivotStretch * 5,
+                    new Vector2(bottomPivotStretch + bottomStretchDelta, 0) * 5,
+                    new Vector2(upPivotStretch, h) * 5,
+                    new Vector2(upPivotStretch + upStretchDelta, h) * 5
+                };
+
+                //check https://en.wikipedia.org/wiki/Delaunay_triangulation to view this definition
+                var alpha = Vector2.Angle(points[1] - points[0], points[2] - points[0]);
+                var gamma = Vector2.Angle(points[1] - points[3], points[2] - points[3]);
+
+                var oneTwoConnect =
+                    alpha + gamma <= 180f; //should create a connection between point index 1 and 2 or between point index 0 and 3
+
+                if (upPivotIndex == upLoop.Length)
+                    oneTwoConnect = true;
+                
+                if (bottomPivotIndex == bottomLoop.Length)
+                    oneTwoConnect = false;
+                
+                var meshIndexes = new int[3];
+
+                if (oneTwoConnect)
+                {
+                    meshIndexes[0] = GetLoopedIndex(bottomPivotIndex + 1, bottomLoop.Length) + meshPointIndexCarrie;
+                    meshIndexes[1] = GetLoopedIndex(upPivotIndex, upLoop.Length) + bottomLoop.Length + meshPointIndexCarrie;
+                    meshIndexes[2] = GetLoopedIndex(bottomPivotIndex, bottomLoop.Length) + meshPointIndexCarrie;
+
+                    if (bottomPivotIndex < bottomLoop.Length)
+                    {
+                        bottomPivotIndex++;
+                        bottomPivotStretch += bottomStretchDelta;
+                    }
+                }
+                else
+                {
+                    meshIndexes[0] = GetLoopedIndex(bottomPivotIndex, bottomLoop.Length) + meshPointIndexCarrie;
+                    meshIndexes[1] = GetLoopedIndex(upPivotIndex + 1, upLoop.Length) + bottomLoop.Length + meshPointIndexCarrie;
+                    meshIndexes[2] = GetLoopedIndex(upPivotIndex, upLoop.Length) + bottomLoop.Length + meshPointIndexCarrie;
+
+                    if (upPivotIndex < upLoop.Length)
+                    {
+                        upPivotIndex++;
+                        upPivotStretch += upStretchDelta;
+                    }
+                }
+                
+                foreach (var meshIndex in meshIndexes)
+                    _triangles.Add(meshIndex);
+
+                if (upPivotIndex >= upLoop.Length &&
+                    bottomPivotIndex >= bottomLoop.Length) //got to the end of any loop
+                {
+                    meshPointIndexCarrie += bottomLoop.Length;
+                    _updateMeshFlag = true;
+                    Thread.Sleep(5000);
+                    break;
+                }
+                
+                Thread.Sleep(50);
+            }
+        }
+
+        int GetLoopedIndex(int index, int listCount)
+        {
+            return index % listCount;
+        }
+    }
+
+    public void KillThread()
+    {
+        _killThreadFlag = true;
+    }
+    
+    public void MeshingTick()
+    {
+        if (_updateMeshFlag)
+        {
+            _mesh.vertices = _meshPoints.ToArray();
+            _mesh.triangles = _triangles.ToArray();
+            _mesh.RecalculateNormals();
+            _updateMeshFlag = false;
+        }
+    }
+    
+    public void DrawGizmos()
+    {
+        //Gizmos.matrix = Matrix4x4.identity;
+        
+        Gizmos.color = new Color(_clusterMetadata.ClusterId / 50f, 0f, 1f);
+        try
+        {
+            
+            if (_meshPoints == null)
+                return;
+
+            for (var i = 0; i < _meshPoints.Length; i++)
+                Gizmos.DrawSphere(_meshPoints[i], 0.005f);
+
+            Gizmos.color = Color.yellow;
+            if (_mesh != null)
+            {
+                Vector3 pa;
+                Vector3 pb;
+                
+                for (var i = 0; i < _triangles.Count; i += 3)
+                {
+                    for (var j = 0; j < 3; j++)
+                    {
+                        pa = _meshPoints[_triangles[i + j]];
+                        pb = _meshPoints[_triangles[i + (j + 1) % 3]];
+                        Gizmos.DrawLine(pa, pb);
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            
+        }
+        //gizmos stuffs
     }
     
     private class IndexAndDecimateValue : IComparable<IndexAndDecimateValue>

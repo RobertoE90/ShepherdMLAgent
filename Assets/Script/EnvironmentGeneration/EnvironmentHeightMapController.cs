@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Mathematics;
-using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Debug = UnityEngine.Debug;
@@ -43,6 +42,12 @@ public class EnvironmentHeightMapController : BaseCameraBaker
         
         OnMeshClusterFinishedAction += UpdateLoopedMeshes;
         //Initialize(Vector2.one * 200, 2, 0.01f, Vector3.zero, quaternion.identity);
+    }
+
+    private void OnDestroy()
+    {
+        foreach (var lm in _landMeshes)
+            lm.KillThread();
     }
     
     public override void Initialize(Vector2 bakeArea, float texturePPU, float worldScale, Vector3 centerWorldPosition, Quaternion centerWorldRotation)
@@ -141,6 +146,12 @@ public class EnvironmentHeightMapController : BaseCameraBaker
         
         _debugCluster++;
         _debugCluster %= _landMeshes.Count;
+        
+        foreach (var lm in _landMeshes)
+        {
+            lm.MeshingTick();
+        }
+        //_landMeshes[0].MeshingTick();
     }
     
     private void UpdateLoopedMeshes()
@@ -484,7 +495,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
         if (_landMeshes == null || _landMeshes.Count == 0)
             return;
 
-        //_landMeshes[_debugCluster].DrawGizmos();
+        //_landMeshes[0].DrawGizmos();
         
         foreach (var lm in _landMeshes)
         {
