@@ -89,7 +89,10 @@ public class CopySheepTransformSystem : SystemBase
             {
                 if (i % _executionLoopLength != _chunkExcecutionCode)
                     continue;
-
+                
+                if(_transformArray.Length == 0)
+                    return;
+                
                 var referenceMatrix = _transformArray[indexRefs[i].ReferenceIndex];
                 
                 if (indexRefs[i].CopyTranslation)

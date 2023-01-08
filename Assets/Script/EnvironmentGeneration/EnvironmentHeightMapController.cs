@@ -233,7 +233,7 @@ public class EnvironmentHeightMapController : BaseCameraBaker
                     new int2(source.width, source.height),
                     4);
                 
-                _clusterProcessingThread.Start();
+                _clusterProcessingThread?.Start();
             });
     }
 

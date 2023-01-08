@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Unity.Collections;
 using Unity.Entities;
@@ -143,12 +144,14 @@ public class SheepDotsManager : MonoBehaviour
                 });;
 
             _entityManager.SetComponentData<RenderBounds>(_sheepEntities[i], new RenderBounds { Value = sheepBounds });
-
         }
     }
 
     private void OnDestroy()
     {
-        _sheepEntities.Dispose();
+        try
+        {
+            _sheepEntities.Dispose();
+        }catch(ObjectDisposedException e){}
     }
 }

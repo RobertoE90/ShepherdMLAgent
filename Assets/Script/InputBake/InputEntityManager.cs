@@ -17,7 +17,7 @@ public class InputEntityManager : MonoBehaviour
     [Space(20)]
     [SerializeField] private ComputeShader _bakeComputeShader;
     [SerializeField] private Renderer _debugSurfaceRenderer;
-
+    
     private Entity _inputAttractEntity;
     private EntityManager _entityManager;
     private Matrix4x4 _originTransform;
@@ -61,7 +61,7 @@ public class InputEntityManager : MonoBehaviour
         _inputBakeTexture = new RenderTexture(
             (int)(bakeSize.x * texturePPU), 
             (int)(bakeSize.y * texturePPU), 
-            0, 
+            0,
             RenderTextureFormat.ARGB32);
 
         _inputBakeTexture.enableRandomWrite = true;
@@ -174,13 +174,16 @@ public class InputEntityManager : MonoBehaviour
             _movementHeatBakeController.BakeTexture == null)
             return;
 
+        
         var inputBakeKernel = _bakeComputeShader.FindKernel("InputAttractBake");
         _bakeComputeShader.SetTexture(inputBakeKernel, "InputTexture", _inputBakeTexture);
-
+        
         var inputAttractBufferData = ProcessInputAttractData();
         _bakeComputeShader.SetBuffer(inputBakeKernel, "InputAttractDataBuffer", inputAttractBufferData);
         _bakeComputeShader.SetInt("InputAttractBufferCount", inputAttractBufferData.count);
 
+        
+        
         var succeed = ProcessInputRepulseData(out var inputRepulsionBufferData);
         if (succeed)
         {
@@ -195,12 +198,13 @@ public class InputEntityManager : MonoBehaviour
         _bakeComputeShader.SetInt("HeatTextureWidth", _movementHeatBakeController.TextureSize.x);
         _bakeComputeShader.SetInt("HeatTextureHeight", _movementHeatBakeController.TextureSize.x);
         
+        
         _bakeComputeShader.Dispatch(
             inputBakeKernel,
             _inputBakeTexture.width / 4,
             _inputBakeTexture.height / 4,
             1);
-
+        
         inputAttractBufferData.Release();
         inputRepulsionBufferData.Release();
 

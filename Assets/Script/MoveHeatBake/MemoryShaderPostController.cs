@@ -46,6 +46,7 @@ public class MemoryShaderPostController : MonoBehaviour
         if (_cacheRenderTexture == null || _baker == null || !_baker.IsInitialized )
             return;
 
+        
         var kernelHandle = _memoryComputeShader.FindKernel("TextureDecay");
         _memoryComputeShader.SetFloat(_decayPropertyId, _decayValue);
         _memoryComputeShader.SetFloat(_tracedecayPropertyId, _traceDecayValue);
@@ -57,6 +58,7 @@ public class MemoryShaderPostController : MonoBehaviour
             _baker.TextureSize.x / 4, 
             _baker.TextureSize.y / 4, 
             1);
+        
     }
 
     private void OnDisable()

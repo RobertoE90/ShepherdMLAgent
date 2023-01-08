@@ -12,7 +12,7 @@ using UnityEngine.Rendering.Universal;
 
 public class SheepHeardJobSystem : SystemBase
 {
-    private const float SHEEP_MOVEMENT_SPEED = 1f;
+    private const float SHEEP_MOVEMENT_SPEED = 3f;
     private const float SHEEP_TURN_SPEED = 0.085f;
     private EntityQuery _sheepsQuery;
 
@@ -65,6 +65,7 @@ public class SheepHeardJobSystem : SystemBase
             var physicalSizeTextureComponent = EntityManager.GetSharedComponentData<PhysicalSizeTexture>(entity);
             if(physicalSizeTextureComponent.Type == TextureTypes.MOVE_HEAT_TEXTURE && _bakedHeatTexture == null)
             {
+                try { _bakedHeatTextureData.Dispose(); } catch(Exception e){}
 
                 _bakedHeatTexture = physicalSizeTextureComponent.TextureReference;
                 _mapsPhysicalSize = physicalSizeTextureComponent.PhysicalTextureSize;
@@ -73,6 +74,9 @@ public class SheepHeardJobSystem : SystemBase
             }
             if(physicalSizeTextureComponent.Type == TextureTypes.INPUT_BAKE_TEXTURE && _inputsTexture == null)
             {
+
+                try { _inputsTextureData.Dispose(); } catch(Exception e){}
+                
                 _inputsTexture = physicalSizeTextureComponent.TextureReference;
                 inputPhysicalRectSize = physicalSizeTextureComponent.PhysicalTextureSize;
                 _inputTexturesSize = new int2(_inputsTexture.width, _inputsTexture.height);
@@ -155,6 +159,7 @@ public class SheepHeardJobSystem : SystemBase
     protected override void OnDestroy()
     {
         _bakedHeatTextureData.Dispose();
+        _inputsTextureData.Dispose();
     }
 
     protected override void OnUpdate()
